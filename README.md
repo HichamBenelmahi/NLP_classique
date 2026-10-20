@@ -1,5 +1,11 @@
 # NLP_classqiue
 
+création de venv : 
+
+```powershell
+py -m venv .venv
+```
+
 activé venv file 
 
 ```powershell
