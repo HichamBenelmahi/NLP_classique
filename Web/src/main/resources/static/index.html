@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse Biomédicale - GENIA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Palette de couleurs minimaliste */
+        :root {
+            --olive: #5e6b4d;
+            --noir: #1a1a1a;
+            --blanc: #fcfcfc;
+        }
+
+        body {
+            background-color: #f4f4f0; /* Blanc cassé / beige très clair */
+            color: var(--noir);
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* Taches d'arrière-plan pour sublimer l'effet de verre */
+        .blob-1 {
+            position: absolute; top: -10%; left: -10%; width: 50vw; height: 50vw;
+            background: rgba(94, 107, 77, 0.15); /* Olive très clair */
+            filter: blur(80px); border-radius: 50%; z-index: -1;
+        }
+        .blob-2 {
+            position: absolute; bottom: -20%; right: -10%; width: 40vw; height: 40vw;
+            background: rgba(26, 26, 26, 0.08); /* Noir très clair */
+            filter: blur(80px); border-radius: 50%; z-index: -1;
+        }
+
+        /* Effet Morpho Glaces (Glassmorphism) */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04);
+            border-radius: 1rem;
+        }
+
+        /* Style des entités (Olive, Noir, Blanc) */
+        .entity {
+            padding: 0.2rem 0.5rem;
+            margin: 0 0.15rem;
+            border-radius: 0.4rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-weight: 500;
+        }
+        .entity-label {
+            font-size: 0.55rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            opacity: 0.8;
+            font-weight: 600;
+        }
+
+        /* Couleurs des classes biomédicales */
+        .tag-PROTEIN { background-color: var(--olive); color: white; }
+        .tag-CELL_TYPE, .tag-CELLTYPE { background-color: var(--noir); color: white; }
+        .tag-DNA { border: 1px solid var(--olive); color: var(--olive); }
+        .tag-RNA { border: 1px solid var(--noir); color: var(--noir); }
+
+        /* Personnalisation des scrollbars pour l'historique */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
+    </style>
+</head>
+<body class="min-h-screen p-6 md:p-12 relative">
+
+<!-- Formes abstraites pour l'effet de verre -->
+<div class="blob-1"></div>
+<div class="blob-2"></div>
+
+<div class="max-w-7xl mx-auto">
+
+    <!-- En-tête -->
+    <header class="mb-10 flex justify-between items-end border-b border-black/10 pb-4">
+        <div>
+            <h1 class="text-3xl font-light tracking-tight">Analyseur Biomédical</h1>
+            <p class="text-sm opacity-60 mt-1">Extraction d'entités par modèle SVM</p>
+        </div>
+        <!-- Bouton Nouvelle Analyse -->
+        <button onclick="nouvelleAnalyse()" class="text-sm font-medium hover:opacity-60 transition-opacity">
+            + Nouvelle analyse
+        </button>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        <!-- Colonne Principale (Saisie + Résultat) -->
+        <div class="lg:col-span-2 space-y-8">
+
+            <!-- Bloc de Saisie -->
+            <div class="glass-card p-8">
+                <label class="block text-sm font-medium opacity-80 mb-4">Texte source</label>
+                <textarea id="inputText" rows="4"
+                          class="w-full bg-transparent border-none focus:ring-0 text-lg leading-relaxed resize-none placeholder-black/30"
+                          placeholder="Saisissez ou collez votre texte biomédical ici..."></textarea>
+
+                <div class="flex justify-end mt-4 pt-4 border-t border-black/5">
+                    <button onclick="lancerAnalyse()"
+                            class="bg-[#5e6b4d] hover:bg-[#4a543d] text-white px-6 py-2.5 rounded-full text-sm font-medium transition-colors shadow-sm">
+                        Analyser le texte
+                    </button>
+                </div>
+            </div>
+
+            <!-- Bloc de Résultat -->
+            <div class="glass-card p-8 min-h-[150px]">
+                <div class="flex justify-between items-center mb-6">
+                    <span class="text-sm font-medium opacity-80">Résultat</span>
+                    <span id="statusAnalyse" class="text-xs font-mono opacity-50">En attente</span>
+                </div>
+                <div id="resultat" class="leading-[2.5] text-lg text-black/80">
+                    <span class="opacity-40 italic">L'annotation apparaîtra ici.</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Colonne Historique -->
+        <aside class="glass-card p-6 h-[600px] flex flex-col">
+            <h2 class="text-sm font-medium opacity-80 mb-6 pb-4 border-b border-black/10">Historique de session</h2>
+            <div id="listeHistorique" class="overflow-y-auto flex-1 space-y-3 pr-2">
+                <p class="text-sm opacity-40 italic mt-2">Aucune analyse pour le moment.</p>
+            </div>
+        </aside>
+
+    </div>
+</div>
+
+<script>
+    // Tableau pour stocker les logs de la session
+    let historiqueSession = [];
+
+    // 1. Fonction pour vider l'écran et préparer une nouvelle analyse
+    function nouvelleAnalyse() {
+        document.getElementById('inputText').value = '';
+        document.getElementById('resultat').innerHTML = '<span class="opacity-40 italic">L\'annotation apparaîtra ici.</span>';
+        document.getElementById('statusAnalyse').textContent = 'Prêt';
+        document.getElementById('inputText').focus();
+    }
+
+    // 2. Fonction principale pour appeler l'API
+    async function lancerAnalyse() {
+        const texte = document.getElementById('inputText').value.trim();
+        if (!texte) return;
+
+        const divResultat = document.getElementById('resultat');
+        const status = document.getElementById('statusAnalyse');
+
+        divResultat.innerHTML = "<span class='opacity-40 italic'>Analyse en cours...</span>";
+        status.textContent = "Calcul...";
+
+        try {
+            // Appel à l'API Spring Boot (URL relative gérant le port 8081 automatiquement)
+            const reponseHTTP = await fetch('/api/ner/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: texte })
+            });
+
+            if (!reponseHTTP.ok) throw new Error("Erreur serveur");
+
+            const donnees = await reponseHTTP.json();
+
+            // Affichage du résultat
+            afficherResultat(donnees.entities);
+            status.textContent = "Terminé";
+
+            // Ajout à l'historique
+            ajouterAHistorique(texte, donnees.entities);
+
+        } catch (erreur) {
+            divResultat.innerHTML = `<span style="color: #8b0000;">Erreur : ${erreur.message}</span>`;
+            status.textContent = "Échec";
+        }
+    }
+
+    // 3. Fonction pour dessiner les tags colorés
+    function afficherResultat(entities) {
+        const divResultat = document.getElementById('resultat');
+        divResultat.innerHTML = '';
+
+        entities.forEach(mot => {
+            const span = document.createElement('span');
+
+            if (mot.tag === "O") {
+                span.textContent = mot.token + " ";
+            } else {
+                span.className = `entity tag-${mot.tag}`;
+                span.innerHTML = `${mot.token} <span class="entity-label">${mot.tag}</span>`;
+                divResultat.appendChild(span);
+                divResultat.appendChild(document.createTextNode(" "));
+                return;
+            }
+            divResultat.appendChild(span);
+        });
+    }
+
+    // 4. Fonction pour gérer l'historique (Logs)
+    function ajouterAHistorique(texte, entities) {
+        // Création d'un identifiant unique basé sur l'heure
+        const id = Date.now();
+        const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second:'2-digit' });
+
+        // Éviter les doublons si on clique deux fois sur "Analyser"
+        if (historiqueSession.length > 0 && historiqueSession[0].texte === texte) return;
+
+        // Ajout au début du tableau (le plus récent en haut)
+        historiqueSession.unshift({ id, heure, texte, entities });
+        rendreHistorique();
+    }
+
+    // 5. Fonction pour afficher l'historique dans la colonne de droite
+    function rendreHistorique() {
+        const conteneur = document.getElementById('listeHistorique');
+        conteneur.innerHTML = '';
+
+        historiqueSession.forEach(item => {
+            // Aperçu du texte (les 40 premiers caractères)
+            const apercu = item.texte.length > 40 ? item.texte.substring(0, 40) + '...' : item.texte;
+
+            const carteLog = document.createElement('div');
+            carteLog.className = 'p-3 rounded-lg bg-white/40 border border-white/60 cursor-pointer hover:bg-white/60 transition-colors shadow-sm';
+            carteLog.onclick = () => chargerDepuisHistorique(item);
+
+            carteLog.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs font-mono opacity-50">${item.heure}</span>
+                        <span class="text-[10px] uppercase tracking-wider opacity-50">${item.entities.filter(e => e.tag !== 'O').length} entités</span>
+                    </div>
+                    <p class="text-sm truncate opacity-80">${apercu}</p>
+                `;
+            conteneur.appendChild(carteLog);
+        });
+    }
+
+    // 6. Fonction pour recharger une ancienne analyse en cliquant dessus
+    function chargerDepuisHistorique(item) {
+        document.getElementById('inputText').value = item.texte;
+        document.getElementById('statusAnalyse').textContent = `Chargé depuis l'historique`;
+        afficherResultat(item.entities);
+    }
+</script>
+</body>
+</html>
