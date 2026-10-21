@@ -262,3 +262,73 @@ J. Kazama, T. Makino, Y. Ohta, J. Tsujii. *Tuning Support Vector Machines for Bi
 # **Partie model**
 
 # **Partie web**
+
+## Architecture et Déploiement : Implémentation du Pattern BFF (Backend For Frontend)
+
+Pour garantir la sécurité, la robustesse et une séparation stricte des responsabilités (Separation of Concerns), ce projet adopte une architecture de type Backend For Frontend (BFF). Le serveur Spring Boot agit comme une passerelle d'API (API Gateway) et un bouclier exclusif entre le client (l'interface utilisateur web) et le service de traitement asynchrone (le modèle d'Intelligence Artificielle exposé via FastAPI en Python).
+
+Cette approche empêche l'exposition directe du modèle d'apprentissage automatique sur le réseau public, protégeant ainsi les ressources matérielles de calcul et masquant la complexité de l'infrastructure sous-jacente.
+
+### 1. Flux de Données et Contrats d'Interface (DTOs)
+
+La communication inter-processus est strictement typée et standardisée via des objets de transfert de données (DTOs). L'utilisation des `records` (introduits dans les versions récentes de Java) garantit l'immuabilité des données et la sécurité des threads (thread-safety) lors du traitement simultané de plusieurs requêtes.
+
+La bibliothèque Jackson, intégrée nativement dans Spring Boot, gère la sérialisation et la désérialisation du format JSON de manière transparente selon les contrats suivants :
+
+* **NerRequest** : Encapsule la charge utile (payload). Il contient la chaîne de caractères soumise par l'utilisateur ainsi qu'un identifiant de session unique (`sessionId`) généré côté client pour le traçage et l'observabilité.
+* **NerResponse** : Agit comme le conteneur de la réponse du modèle d'IA. Il attend une structure JSON précise contenant une liste d'entités.
+* **EntityToken** : Représente l'unité d'analyse atomique. Il associe le texte brut extrait (`token`) à sa classification biomédicale issue du corpus GENIA (`tag` tel que PROTEIN, DNA, CELL_TYPE).
+
+### 2. Logique Métier et Communication Inter-Services (Couche Service)
+
+L'orchestration de la communication réseau est encapsulée dans la classe `NerService`. Cette couche a trois responsabilités critiques :
+
+* **Validation et Sanitarisation** : Les données entrantes subissent une validation en amont (vérification de la nullité, limitation stricte de la longueur des chaînes). Cette étape prévient l'épuisement des ressources (attaques DoS ou dépassement de la mémoire allouée) avant même que le modèle de machine learning ne soit sollicité.
+* **Client HTTP Moderne** : L'interface `RestClient` (l'API fluide et moderne de Spring remplaçant `RestTemplate`) est utilisée pour forger et exécuter les requêtes HTTP POST de manière synchrone vers l'instance FastAPI locale (port 8000).
+* **Résilience et Tolérance aux Pannes** : La méthode d'appel intègre un mécanisme de capture d'exceptions. Si le microservice Python est hors ligne ou subit une surcharge temporelle, l'erreur réseau est interceptée. Le service renvoie alors une exception métier claire, évitant la propagation d'une erreur critique (Cascading Failure) qui ferait s'effondrer l'application principale.
+
+### 3. Exposition de l'API (Couche Contrôleur)
+
+La classe `NerController` expose l'endpoint RESTful principal sur la route `/api/ner/analyze`. Annotée de l'annotation `@RestController`, elle gère la traduction du protocole HTTP vers les objets Java. Elle réceptionne le corps de la requête (`@RequestBody`), délègue le traitement séquentiel au `NerService`, et encapsule le résultat final dans un objet `ResponseEntity`. Ce mécanisme assure le renvoi des codes de statut HTTP standardisés (ex: HTTP 200 OK en cas de succès).
+
+---
+
+## Interface Utilisateur et Ingénierie Front-end
+
+L'interface graphique est conçue comme une Single Page Application (SPA) légère, s'appuyant sur des technologies web natives (Vanilla JavaScript, HTML5) et le framework utilitaire Tailwind CSS, sans nécessiter de bibliothèque lourde comme React ou Angular.
+
+### Design System : L'approche Glassmorphism
+
+L'interface rompt avec les paradigmes visuels habituels des outils d'intelligence artificielle. Elle adopte un style "Morpho Glaces" (Glassmorphism) qui confère un aspect académique, éditorial et minimaliste.
+
+* **Technique CSS** : L'effet de verre dépoli est obtenu grâce aux propriétés CSS avancées `backdrop-filter: blur()` combinées à des arrière-plans semi-transparents (`rgba`).
+* **DOM Dynamique** : L'affichage des résultats ne nécessite aucun rechargement de page. Le moteur JavaScript parse le tableau JSON reçu et manipule le Document Object Model (DOM) en créant dynamiquement des éléments `<span>`. Les balises générées intègrent des classes CSS spécifiques (ex: `tag-PROTEIN`), appliquant une typographie colorée stricte (Vert Olive, Noir, Blanc) basée sur la classification du modèle.
+* **Responsive Design** : L'utilisation d'unités relatives et d'une grille CSS (CSS Grid) permet à l'interface de s'adapter dynamiquement aux contraintes d'affichage (smartphones, tablettes, moniteurs haute résolution).
+
+### Gestion de l'État Client et Observabilité
+
+L'application est optimisée pour des démonstrations publiques massives et simultanées.
+
+* **Isolation des Sessions** : L'état de l'application (l'historique des requêtes) est géré de manière éphémère dans la mémoire vive (RAM) du navigateur de chaque utilisateur via des tableaux JavaScript. Cette architecture "Stateless" côté serveur garantit qu'aucune donnée utilisateur ne se croise.
+* **Mise en Cache Visuelle** : La sélection d'un élément dans l'historique latéral recharge instantanément les données précédemment analysées dans la vue principale. Cette opération se fait intégralement côté client, évitant une nouvelle requête réseau redondante vers le serveur d'IA.
+* **Traçage des Requêtes** : Dès l'initialisation de l'interface, une fonction mathématique génère un identifiant de session unique (UUID allégé). Ce jeton est injecté dans chaque payload HTTP, permettant à l'administrateur de surveiller l'activité et le multiplexage des utilisateurs en temps réel via les logs de la console Spring Boot.
+
+---
+
+## Stratégie de Déploiement et d'Intégration (Monorepo)
+
+Le dépôt de code source adopte une structure Monorepo, hébergeant conjointement le code d'infrastructure (Java) et la logique scientifique (Python/SVM). Cette organisation garantit que les contrats d'interface (le format JSON attendu) évoluent de manière synchronisée.
+
+### Transition Isomorphe (Du Mock à la Production)
+
+Le découplage fort induit par le serveur Spring Boot permet une transition technique transparente lors de la finalisation du modèle d'apprentissage automatique.
+L'adresse du service Python cible est externalisée dans le fichier de configuration `application.properties`. Ainsi, le remplacement de l'API de simulation (Mock) par le modèle SVM réel basé sur le corpus GENIA ne nécessite aucune recompilation du code Java ni aucune altération du code Front-end. L'intégrité du système repose exclusivement sur le respect du contrat de nommage des clés JSON.
+
+### Déploiement Dynamique et Reverse Proxy (Ngrok)
+
+Pour contourner les restrictions des réseaux locaux (NAT/Firewalls) lors de sessions de démonstration académique, le système s'appuie sur le logiciel de tunnelisation Ngrok.
+
+* Le client Ngrok établit une connexion TCP sortante sécurisée depuis la machine hôte vers les serveurs Edge de Ngrok.
+* Le trafic entrant sur un domaine statique public (ex: `https://projet-nlp.ngrok-free.app`) est instantanément redirigé vers le port local du serveur Spring Boot.
+* Cette architecture permet de transformer l'application de développement local en un service SaaS (Software as a Service) temporaire, distribuable à l'audience via un simple code QR, avec des temps de latence minimisés.
+
